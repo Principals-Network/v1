@@ -73,7 +73,7 @@ def create_interview_workflow(mock_responses: bool = True) -> Graph:
         try:
             current = state["current_phase"]
             insights = state["collected_insights"]
-            required_insights = ["initial_insights", "learning_style", "career_goals", "skills"]
+            required_insights = ["initial_insights", "learning_style", "career_goals"]
 
             print(f"DEBUG: Current phase: {current}")
             print(f"DEBUG: Collected insights: {insights}")
@@ -85,9 +85,8 @@ def create_interview_workflow(mock_responses: bool = True) -> Graph:
             )
 
             print(f"DEBUG: Has all insights: {has_all_insights}")
-            print(f"DEBUG: Current phase check: {current == 'skills_assessment'}")
 
-            if current == "skills_assessment" and has_all_insights:
+            if has_all_insights:
                 print("DEBUG: All conditions met, ending interview")
                 return END
 
@@ -106,7 +105,7 @@ def create_interview_workflow(mock_responses: bool = True) -> Graph:
 
     workflow.add_edge("learning_analyzer", lambda x: "coordinator")
     workflow.add_edge("career_analyzer", lambda x: "coordinator")
-    workflow.add_edge("aggregator", should_end_interview)  # Remove lambda wrapper to ensure proper state validation
+    workflow.add_edge("aggregator", lambda x: END)  # Always end after aggregation
 
     # Set the entry point
     workflow.set_entry_point("coordinator")
