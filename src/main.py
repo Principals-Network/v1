@@ -44,10 +44,16 @@ def process_user_input(workflow: Any, user_input: str, state: InterviewState) ->
 
         # Create a copy of the state for workflow
         state_dict = state.dict()
+        print(f"DEBUG: State dict before workflow: {state_dict}")
 
         # Invoke workflow and get result
-        result = workflow.invoke(state_dict)
-        print(f"DEBUG: Workflow result: {result}")
+        try:
+            result = workflow.invoke(state_dict)
+            print(f"DEBUG: Workflow result: {result}")
+        except Exception as e:
+            print(f"ERROR in workflow.invoke: {str(e)}")
+            traceback.print_exc()
+            return "I apologize, but I encountered an error in the workflow. Could you please try again?", state
 
         if result == END:
             print("DEBUG: Workflow reached END state")
@@ -55,22 +61,31 @@ def process_user_input(workflow: Any, user_input: str, state: InterviewState) ->
             return "Thank you for completing the interview! I'll prepare your personalized report.", state
 
         # Update existing state with new values
-        try:
-            state.update_from_dict(result)
-            print(f"DEBUG: State updated successfully - Phase: {state.current_phase}")
-        except Exception as e:
-            print(f"ERROR updating state: {str(e)}")
-            return "I apologize, but I encountered an error updating the interview state. Could you please try again?", state
+        if isinstance(result, dict):
+            try:
+                state.update_from_dict(result)
+                print(f"DEBUG: State updated successfully - Phase: {state.current_phase}")
+            except Exception as e:
+                print(f"ERROR updating state: {str(e)}")
+                traceback.print_exc()
+                return "I apologize, but I encountered an error updating the interview state. Could you please try again?", state
+        else:
+            print(f"ERROR: Unexpected workflow result type: {type(result)}")
+            return "I apologize, but I received an unexpected response. Could you please try again?", state
 
         last_message = state.get_last_message()
-        response = last_message.get("content") if last_message else "I apologize, but I couldn't process your response properly. Could you please try again?"
+        if not last_message or "content" not in last_message:
+            print("ERROR: No valid last message found")
+            return "I apologize, but I couldn't process your response properly. Could you please try again?", state
 
+        response = last_message["content"]
         print(f"DEBUG: Updated state - Phase: {state.current_phase}, Completed: {state.completed_phases}")
         return response, state
 
     except Exception as e:
         print(f"ERROR in process_user_input: {str(e)}")
-        return "I apologize, but I encountered an error processing your response. Could you please rephrase or provide more details?", state
+        traceback.print_exc()
+        return "I apologize, but I encountered an error processing your response. Could you please try again?", state
 
 @app.post("/interview/start")
 async def start_interview() -> InterviewResponse:
@@ -79,18 +94,28 @@ async def start_interview() -> InterviewResponse:
         session_id = str(uuid.uuid4())
         print(f"\nDEBUG: Starting new interview session: {session_id}")
 
-        workflow = create_interview_workflow(mock_responses=True)
-        print("DEBUG: Created workflow with mock responses")
+        try:
+            workflow = create_interview_workflow(mock_responses=True)
+            print("DEBUG: Created workflow with mock responses")
+        except Exception as e:
+            print(f"ERROR creating workflow: {str(e)}")
+            traceback.print_exc()
+            raise ValueError(f"Failed to create workflow: {str(e)}")
 
         state = InterviewState()
         print(f"DEBUG: Initialized state - Phase: {state.current_phase}")
 
         # Initialize state with empty message to trigger first response
-        response, updated_state = process_user_input(
-            workflow=workflow,
-            user_input="",
-            state=state
-        )
+        try:
+            response, updated_state = process_user_input(
+                workflow=workflow,
+                user_input="",
+                state=state
+            )
+        except Exception as e:
+            print(f"ERROR processing initial input: {str(e)}")
+            traceback.print_exc()
+            raise ValueError(f"Failed to process initial input: {str(e)}")
 
         if not response or not updated_state:
             raise ValueError("Failed to initialize interview state")
@@ -106,19 +131,20 @@ async def start_interview() -> InterviewResponse:
 
     except Exception as e:
         print(f"ERROR in start_interview: {str(e)}")
-        print(f"Traceback: {traceback.format_exc()}")
+        traceback.print_exc()
         raise HTTPException(
             status_code=500,
-            detail=str(e)
+            detail={"error": "Failed to start interview", "message": str(e)}
         )
 
 @app.post("/interview/{session_id}/respond")
 async def respond_to_interview(session_id: str, user_input: UserInput) -> InterviewResponse:
+    """Process user response in interview session."""
     try:
         if session_id not in interview_sessions:
             raise HTTPException(
                 status_code=404,
-                detail="Interview session not found"
+                detail={"error": "Session not found", "message": "Interview session not found"}
             )
 
         state, workflow = interview_sessions[session_id]
@@ -126,14 +152,19 @@ async def respond_to_interview(session_id: str, user_input: UserInput) -> Interv
         print(f"DEBUG: Current state - Phase: {state.current_phase}")
         print(f"DEBUG: Current insights: {state.collected_insights}")
 
-        response, updated_state = process_user_input(
-            workflow=workflow,
-            user_input=user_input.message,
-            state=state
-        )
+        try:
+            response, updated_state = process_user_input(
+                workflow=workflow,
+                user_input=user_input.message,
+                state=state
+            )
+        except Exception as e:
+            print(f"ERROR processing user input: {str(e)}")
+            traceback.print_exc()
+            raise ValueError(f"Failed to process user input: {str(e)}")
 
         if not response or not updated_state:
-            raise ValueError("Failed to process user input")
+            raise ValueError("Failed to process user input: no response or state update")
 
         # Update session state
         interview_sessions[session_id] = (updated_state, workflow)
@@ -155,12 +186,19 @@ async def respond_to_interview(session_id: str, user_input: UserInput) -> Interv
             completed_phases=updated_state.completed_phases
         )
 
+    except ValueError as e:
+        print(f"ERROR in respond_to_interview (ValueError): {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Invalid request", "message": str(e)}
+        )
     except Exception as e:
         print(f"ERROR in respond_to_interview: {str(e)}")
-        print(f"Traceback: {traceback.format_exc()}")
+        traceback.print_exc()
         raise HTTPException(
             status_code=500,
-            detail=str(e)
+            detail={"error": "Failed to process response", "message": str(e)}
         )
 
 @app.get("/interview/{session_id}/report")
