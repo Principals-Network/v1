@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, List, Any
 import uuid
+import traceback
+from langgraph.graph import END
 
 from .workflow import create_interview_workflow, InterviewState
 
@@ -40,28 +42,31 @@ def process_user_input(workflow: Any, user_input: str, state: InterviewState) ->
         if user_input:
             state.add_message({"role": "user", "content": user_input})
 
-        # Invoke workflow and get result
-        result = workflow.invoke({
-            "messages": state.messages,
-            "current_phase": state.current_phase,
-            "completed_phases": state.completed_phases,
-            "collected_insights": state.collected_insights
-        })
+        # Create a copy of the state for workflow
+        state_dict = state.dict()
 
+        # Invoke workflow and get result
+        result = workflow.invoke(state_dict)
         print(f"DEBUG: Workflow result: {result}")
 
-        # Create a new state instance with updated values
-        new_state = InterviewState()
-        new_state.messages = result.get("messages", state.messages)
-        new_state.current_phase = result.get("current_phase", state.current_phase)
-        new_state.completed_phases = result.get("completed_phases", state.completed_phases)
-        new_state.collected_insights = result.get("collected_insights", state.collected_insights)
+        if result == END:
+            print("DEBUG: Workflow reached END state")
+            state.current_phase = "complete"
+            return "Thank you for completing the interview! I'll prepare your personalized report.", state
 
-        last_message = new_state.get_last_message()
-        response = last_message["content"] if last_message else "I apologize, but I couldn't process your response properly. Could you please try again?"
+        # Update existing state with new values
+        try:
+            state.update_from_dict(result)
+            print(f"DEBUG: State updated successfully - Phase: {state.current_phase}")
+        except Exception as e:
+            print(f"ERROR updating state: {str(e)}")
+            return "I apologize, but I encountered an error updating the interview state. Could you please try again?", state
 
-        print(f"DEBUG: Updated state - Phase: {new_state.current_phase}, Completed: {new_state.completed_phases}")
-        return response, new_state
+        last_message = state.get_last_message()
+        response = last_message.get("content") if last_message else "I apologize, but I couldn't process your response properly. Could you please try again?"
+
+        print(f"DEBUG: Updated state - Phase: {state.current_phase}, Completed: {state.completed_phases}")
+        return response, state
 
     except Exception as e:
         print(f"ERROR in process_user_input: {str(e)}")
@@ -69,6 +74,7 @@ def process_user_input(workflow: Any, user_input: str, state: InterviewState) ->
 
 @app.post("/interview/start")
 async def start_interview() -> InterviewResponse:
+    """Start a new interview session."""
     try:
         session_id = str(uuid.uuid4())
         print(f"\nDEBUG: Starting new interview session: {session_id}")
@@ -79,11 +85,15 @@ async def start_interview() -> InterviewResponse:
         state = InterviewState()
         print(f"DEBUG: Initialized state - Phase: {state.current_phase}")
 
+        # Initialize state with empty message to trigger first response
         response, updated_state = process_user_input(
             workflow=workflow,
             user_input="",
             state=state
         )
+
+        if not response or not updated_state:
+            raise ValueError("Failed to initialize interview state")
 
         interview_sessions[session_id] = (updated_state, workflow)
 
@@ -96,16 +106,14 @@ async def start_interview() -> InterviewResponse:
 
     except Exception as e:
         print(f"ERROR in start_interview: {str(e)}")
+        print(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=500,
-            detail={"error": "Failed to start interview", "message": str(e)}
+            detail=str(e)
         )
 
 @app.post("/interview/{session_id}/respond")
-async def respond_to_interview(
-    session_id: str,
-    user_input: UserInput
-) -> InterviewResponse:
+async def respond_to_interview(session_id: str, user_input: UserInput) -> InterviewResponse:
     try:
         if session_id not in interview_sessions:
             raise HTTPException(
@@ -115,29 +123,44 @@ async def respond_to_interview(
 
         state, workflow = interview_sessions[session_id]
         print(f"\nDEBUG: Processing response for session {session_id}")
-        print(f"DEBUG: Current phase: {state.current_phase}")
-        print(f"DEBUG: Completed phases: {state.completed_phases}")
+        print(f"DEBUG: Current state - Phase: {state.current_phase}")
+        print(f"DEBUG: Current insights: {state.collected_insights}")
 
-        response, new_state = process_user_input(
+        response, updated_state = process_user_input(
             workflow=workflow,
             user_input=user_input.message,
             state=state
         )
 
-        interview_sessions[session_id] = (new_state, workflow)
+        if not response or not updated_state:
+            raise ValueError("Failed to process user input")
+
+        # Update session state
+        interview_sessions[session_id] = (updated_state, workflow)
+
+        # Check if interview is complete
+        if updated_state.current_phase == "complete":
+            print("DEBUG: Interview complete, generating final response")
+            return InterviewResponse(
+                message="Thank you for completing the interview! I'll prepare your personalized report.",
+                session_id=session_id,
+                phase="complete",
+                completed_phases=updated_state.completed_phases
+            )
 
         return InterviewResponse(
             message=response,
             session_id=session_id,
-            phase=new_state.current_phase,
-            completed_phases=new_state.completed_phases
+            phase=updated_state.current_phase,
+            completed_phases=updated_state.completed_phases
         )
 
     except Exception as e:
         print(f"ERROR in respond_to_interview: {str(e)}")
+        print(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=500,
-            detail={"error": "Failed to process interview response", "message": str(e)}
+            detail=str(e)
         )
 
 @app.get("/interview/{session_id}/report")
