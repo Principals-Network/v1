@@ -26,89 +26,74 @@ def create_interview_workflow(mock_responses: bool = True) -> Graph:
     workflow.add_node("aggregator", aggregator.generate_report)
 
     # Define conditional routing functions with validation
-    def should_transition_to_learning(state: Dict) -> bool:
+    def should_transition_to_learning(state: InterviewState) -> str:
         """Validate and check transition to learning style phase."""
         try:
-            current = state.get("current_phase")
-            insights = state.get("collected_insights", {})
-            return (current == "initial" and
-                   isinstance(insights.get("initial_insights"), dict) and
-                   bool(insights.get("initial_insights")))
+            current = state["current_phase"]
+            insights = state["collected_insights"]
+            if (current == "initial" and
+                isinstance(insights.get("initial_insights"), dict) and
+                bool(insights.get("initial_insights"))):
+                return "learning_analyzer"
+            return "coordinator"
         except Exception as e:
             print(f"ERROR in should_transition_to_learning: {str(e)}")
-            return False
+            return "coordinator"
 
-    def should_transition_to_career(state: Dict) -> bool:
+    def should_transition_to_career(state: InterviewState) -> str:
         """Validate and check transition to career goals phase."""
         try:
-            current = state.get("current_phase")
-            insights = state.get("collected_insights", {})
-            return (current == "learning_style" and
-                   isinstance(insights.get("learning_style"), dict) and
-                   bool(insights.get("learning_style")))
+            current = state["current_phase"]
+            insights = state["collected_insights"]
+            if (current == "learning_style" and
+                isinstance(insights.get("learning_style"), dict) and
+                bool(insights.get("learning_style"))):
+                return "career_analyzer"
+            return "coordinator"
         except Exception as e:
             print(f"ERROR in should_transition_to_career: {str(e)}")
-            return False
+            return "coordinator"
 
-    def should_transition_to_skills(state: Dict) -> bool:
+    def should_transition_to_skills(state: InterviewState) -> str:
         """Validate and check transition to skills assessment phase."""
         try:
-            current = state.get("current_phase")
-            insights = state.get("collected_insights", {})
-            return (current == "career_goals" and
-                   isinstance(insights.get("career_goals"), dict) and
-                   bool(insights.get("career_goals")))
+            current = state["current_phase"]
+            insights = state["collected_insights"]
+            if (current == "career_goals" and
+                isinstance(insights.get("career_goals"), dict) and
+                bool(insights.get("career_goals"))):
+                return "aggregator"
+            return "coordinator"
         except Exception as e:
             print(f"ERROR in should_transition_to_skills: {str(e)}")
-            return False
+            return "coordinator"
 
-    def should_end_interview(state: Dict) -> bool:
+    def should_end_interview(state: InterviewState) -> str:
         """Validate and check if interview should end."""
         try:
-            current = state.get("current_phase")
-            insights = state.get("collected_insights", {})
+            current = state["current_phase"]
+            insights = state["collected_insights"]
             required_insights = ["learning_style", "career_goals", "skills"]
             has_all_insights = all(
                 isinstance(insights.get(key), dict) and bool(insights.get(key))
                 for key in required_insights
             )
-            return current == "skills_assessment" and has_all_insights
+            if current == "skills_assessment" and has_all_insights:
+                return END
+            return "coordinator"
         except Exception as e:
             print(f"ERROR in should_end_interview: {str(e)}")
-            return False
+            return "coordinator"
 
-    # Add conditional edges for phase transitions
-    workflow.add_conditional_edges(
-        "coordinator",
-        {
-            should_transition_to_learning: "learning_analyzer",
-            should_transition_to_career: "career_analyzer",
-            should_transition_to_skills: "aggregator",
-            should_end_interview: END
-        }
-    )
+    # Add edges with proper return values
+    workflow.add_edge("coordinator", should_transition_to_learning)
+    workflow.add_edge("coordinator", should_transition_to_career)
+    workflow.add_edge("coordinator", should_transition_to_skills)
+    workflow.add_edge("coordinator", should_end_interview)
 
-    workflow.add_conditional_edges(
-        "learning_analyzer",
-        {
-            lambda _: True: "coordinator"
-        }
-    )
-
-    workflow.add_conditional_edges(
-        "career_analyzer",
-        {
-            lambda _: True: "coordinator"
-        }
-    )
-
-    workflow.add_conditional_edges(
-        "aggregator",
-        {
-            should_end_interview: END,
-            lambda _: True: "coordinator"
-        }
-    )
+    workflow.add_edge("learning_analyzer", lambda x: "coordinator")
+    workflow.add_edge("career_analyzer", lambda x: "coordinator")
+    workflow.add_edge("aggregator", lambda x: should_end_interview(x))
 
     # Set the entry point
     workflow.set_entry_point("coordinator")
