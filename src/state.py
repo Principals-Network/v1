@@ -1,5 +1,5 @@
 """State management for the interview workflow."""
-from typing import Dict, Any, List, TypeVar, Optional
+from typing import Dict, Any, List, TypeVar, Optional, Iterator
 from dataclasses import dataclass, field
 from langgraph.graph import GraphState
 
@@ -16,20 +16,39 @@ class InterviewState(GraphState):
         "initial_insights": {}
     })
 
+    def __getitem__(self, key: str) -> Any:
+        """Dict-like access for LangGraph compatibility."""
+        try:
+            return getattr(self, key)
+        except AttributeError as e:
+            print(f"ERROR in __getitem__: {str(e)}")
+            raise KeyError(key) from e
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        """Dict-like setter for LangGraph compatibility."""
+        try:
+            setattr(self, key, value)
+        except Exception as e:
+            print(f"ERROR in __setitem__: {str(e)}")
+            raise
+
+    def keys(self) -> Iterator[str]:
+        """Return iterator of state keys for LangGraph compatibility."""
+        return iter(["messages", "current_phase", "completed_phases", "collected_insights"])
+
     def get(self, key: str, default: Any = None) -> Any:
         """Dict-like access to state attributes."""
         try:
-            return getattr(self, key, default)
-        except Exception as e:
-            print(f"ERROR in get: {str(e)}")
+            return self[key]
+        except KeyError:
             return default
 
     def set(self, key: str, value: Any) -> None:
         """Dict-like setter for state attributes."""
         try:
-            if not hasattr(self, key):
+            if key not in self.keys():
                 print(f"WARNING: Setting unknown state field: {key}")
-            setattr(self, key, value)
+            self[key] = value
         except Exception as e:
             print(f"ERROR in set: {str(e)}")
             raise
@@ -37,12 +56,7 @@ class InterviewState(GraphState):
     def dict(self) -> Dict[str, Any]:
         """Convert state to dictionary for LangGraph."""
         try:
-            return {
-                "messages": self.messages,
-                "current_phase": self.current_phase,
-                "completed_phases": self.completed_phases,
-                "collected_insights": self.collected_insights
-            }
+            return {key: self[key] for key in self.keys()}
         except Exception as e:
             print(f"ERROR in dict: {str(e)}")
             return {}
@@ -66,7 +80,7 @@ class InterviewState(GraphState):
         try:
             print(f"DEBUG: Updating state with data: {data}")
             for key, value in data.items():
-                if not hasattr(self, key):
+                if key not in self.keys():
                     print(f"WARNING: Attempting to set unknown state field: {key}")
                     continue
 
@@ -88,7 +102,7 @@ class InterviewState(GraphState):
                         else:
                             print(f"WARNING: Invalid insight value type for {insight_key}: {type(insight_value)}")
 
-                self.set(key, value)
+                self[key] = value
                 print(f"DEBUG: Updated state field {key}: {value}")
 
         except Exception as e:
