@@ -93,7 +93,7 @@ def create_interview_workflow(mock_responses: bool = True) -> Graph:
 
     workflow.add_edge("learning_analyzer", lambda x: "coordinator")
     workflow.add_edge("career_analyzer", lambda x: "coordinator")
-    workflow.add_edge("aggregator", lambda x: should_end_interview(x))
+    workflow.add_edge("aggregator", should_end_interview)  # Remove lambda wrapper to ensure proper state validation
 
     # Set the entry point
     workflow.set_entry_point("coordinator")
