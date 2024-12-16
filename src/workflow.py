@@ -73,16 +73,29 @@ def create_interview_workflow(mock_responses: bool = True) -> Graph:
         try:
             current = state["current_phase"]
             insights = state["collected_insights"]
-            required_insights = ["learning_style", "career_goals", "skills"]
+            required_insights = ["initial_insights", "learning_style", "career_goals", "skills"]
+
+            print(f"DEBUG: Current phase: {current}")
+            print(f"DEBUG: Collected insights: {insights}")
+            print(f"DEBUG: Required insights: {required_insights}")
+
             has_all_insights = all(
                 isinstance(insights.get(key), dict) and bool(insights.get(key))
                 for key in required_insights
             )
+
+            print(f"DEBUG: Has all insights: {has_all_insights}")
+            print(f"DEBUG: Current phase check: {current == 'skills_assessment'}")
+
             if current == "skills_assessment" and has_all_insights:
+                print("DEBUG: All conditions met, ending interview")
                 return END
+
+            print(f"DEBUG: Interview continuing. Phase: {current}, Has all insights: {has_all_insights}")
             return "coordinator"
         except Exception as e:
             print(f"ERROR in should_end_interview: {str(e)}")
+            print(f"ERROR state dump: {state.dict()}")
             return "coordinator"
 
     # Add edges with proper return values
