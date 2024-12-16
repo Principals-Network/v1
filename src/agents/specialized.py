@@ -2,10 +2,11 @@
 
 from typing import Dict, List, Any, Optional
 import traceback
-from langchain_community.chat_models import ChatOpenAI
 from langchain.schema import AIMessage, HumanMessage, SystemMessage
+from langchain_community.chat_models import ChatOpenAI
 from langgraph.graph import END
 from .base import BaseAgent, AgentState
+from src.state import InterviewState
 
 class InterviewCoordinatorAgent(BaseAgent):
     """Manages the overall flow of the interview process."""
@@ -51,26 +52,30 @@ class InterviewCoordinatorAgent(BaseAgent):
             return "skills_assessment"
         return "complete"
 
-    def generate_response(self, user_input: str, context: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def generate_response(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate response based on current state."""
         try:
-            current_phase = self.state.get("current_phase")
+            if isinstance(state, InterviewState):
+                state = state.dict()
+
+            current_phase = state.get("current_phase")
             phase_completion = self.state.get("phase_completion", {})
 
             print(f"DEBUG: Generating response for phase: {current_phase}")
             print(f"DEBUG: Current phase completion status: {phase_completion}")
-            print(f"DEBUG: Processing user input: {user_input[:100] if user_input else 'None'}...")
+            print(f"DEBUG: Processing user input: {state.get('messages', [])[-1].get('content', '')[:100] if state.get('messages') else 'None'}...")
 
             # For initial empty state, return welcome message
-            if not user_input and current_phase == "initial":
+            if not state.get('messages') and current_phase == "initial":
                 return {
-                    "messages": context + [{"role": "assistant", "content": self.mock_responses["initial"]}],
+                    "messages": state.get('messages', []) + [{"role": "assistant", "content": self.mock_responses["initial"]}],
                     "current_phase": current_phase,
                     "collected_insights": {},
                     "next": "coordinator"
                 }
 
             # Process user input and transition phases
-            if user_input:
+            if state.get('messages'):
                 try:
                     phase_transitions = {
                         "initial": ("learning_style", "learning_analyzer", "initial_insights"),
@@ -85,13 +90,15 @@ class InterviewCoordinatorAgent(BaseAgent):
                         # Update phase completion and current phase
                         phase_completion[current_phase] = True
                         self.state.set("phase_completion", phase_completion)
-                        self.state.set("current_phase", next_phase)
+
+                        # Get the last user message for insights
+                        last_message = state.get('messages', [])[-1].get('content', '') if state.get('messages') else ''
 
                         # Prepare response with collected insights
                         return {
-                            "messages": context + [{"role": "assistant", "content": self.mock_responses.get(next_phase, "Thank you for sharing!")}],
+                            "messages": state.get('messages', []) + [{"role": "assistant", "content": self.mock_responses.get(next_phase, "Thank you for sharing!")}],
                             "current_phase": next_phase,
-                            "collected_insights": {insight_key: {"user_input": user_input}},
+                            "collected_insights": {insight_key: {"user_input": last_message}},
                             "next": next_node
                         }
 
@@ -101,7 +108,7 @@ class InterviewCoordinatorAgent(BaseAgent):
 
             # Default response for unknown states
             return {
-                "messages": context + [{"role": "assistant", "content": self.mock_responses.get(current_phase, "I didn't catch that. Could you please try again?")}],
+                "messages": state.get('messages', []) + [{"role": "assistant", "content": self.mock_responses.get(current_phase, "I didn't catch that. Could you please try again?")}],
                 "current_phase": current_phase,
                 "collected_insights": {},
                 "next": "coordinator"
@@ -111,8 +118,8 @@ class InterviewCoordinatorAgent(BaseAgent):
             print(f"ERROR in generate_response: {str(e)}")
             traceback.print_exc()
             return {
-                "messages": context + [{"role": "assistant", "content": "I apologize, but I encountered an error. Could you please try again?"}],
-                "current_phase": self.state.get("current_phase", "initial"),
+                "messages": state.get('messages', []) + [{"role": "assistant", "content": "I apologize, but I encountered an error. Could you please try again?"}],
+                "current_phase": state.get("current_phase", "initial"),
                 "collected_insights": {},
                 "next": "coordinator"
             }
@@ -137,9 +144,12 @@ class LearningStyleAnalyzerAgent(BaseAgent):
         }
         self.llm = None
 
-    def analyze_response(self, user_input: str, context: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def analyze_response(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze user response for learning style insights."""
         try:
+            if isinstance(state, InterviewState):
+                state = state.dict()
+
             if self.mock_responses:
                 analysis = {
                     "learning_style": "Visual and hands-on learner",
@@ -148,7 +158,7 @@ class LearningStyleAnalyzerAgent(BaseAgent):
                     "recommendations": ["Focus on practical projects", "Use visual learning aids", "Interactive coding exercises"]
                 }
                 return {
-                    "messages": context + [{
+                    "messages": state.get('messages', []) + [{
                         "role": "assistant",
                         "content": "Based on your responses, you show a strong preference for visual and hands-on learning approaches."
                     }],
@@ -163,7 +173,7 @@ class LearningStyleAnalyzerAgent(BaseAgent):
         except Exception as e:
             print(f"ERROR in analyze_response: {str(e)}")
             return {
-                "messages": context,
+                "messages": state.get('messages', []),
                 "current_phase": "learning_style",
                 "collected_insights": {},
                 "next": "coordinator"
