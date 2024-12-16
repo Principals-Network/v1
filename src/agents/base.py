@@ -10,13 +10,21 @@ class AgentState(BaseModel):
     messages: List[BaseMessage] = []
     current_phase: str = "initial"
     collected_insights: Dict[str, Any] = {}
+    phase_completion: Dict[str, bool] = {
+        "initial": False,
+        "learning_style": False,
+        "career_goals": False,
+        "skills_assessment": False
+    }
 
     def get(self, key: str, default: Any = None) -> Any:
         """Dict-like access to state attributes."""
         return getattr(self, key, default)
 
     def set(self, key: str, value: Any) -> None:
-        """Dict-like setter for state attributes."""
+        """Dict-like setter for state attributes with validation."""
+        if key == "phase_completion" and not isinstance(value, dict):
+            raise ValueError("phase_completion must be a dictionary")
         setattr(self, key, value)
 
     def add_message(self, message: BaseMessage) -> None:
@@ -59,6 +67,10 @@ class BaseAgent:
                 if key not in self.state.collected_insights:
                     self.state.collected_insights[key] = {}
                 self.state.collected_insights[key].update(value)
+            elif key == "phase_completion":
+                if not isinstance(value, dict):
+                    raise ValueError("phase_completion must be a dictionary")
+                self.state.phase_completion.update(value)
             else:
                 self.state.set(key, value)
         except Exception as e:

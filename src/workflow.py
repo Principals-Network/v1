@@ -17,7 +17,8 @@ class InterviewState:
         self.collected_insights: Dict[str, Dict] = {
             "learning_style": {},
             "career_goals": {},
-            "skills": {}
+            "skills": {},
+            "initial_insights": {}  # Add this to match coordinator's insight key
         }
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -29,15 +30,35 @@ class InterviewState:
         setattr(self, key, value)
 
     def update_from_dict(self, data: Dict[str, Any]) -> None:
-        """Update state from dictionary with validation."""
+        """Update state from dictionary with validation and error tracking."""
         try:
             for key, value in data.items():
-                if hasattr(self, key):
-                    self.set(key, value)
-                    if key == "current_phase" and value not in self.completed_phases:
-                        self.completed_phases.append(value)
+                if not hasattr(self, key):
+                    print(f"WARNING: Attempting to set unknown state field: {key}")
+                    continue
+
+                if key == "current_phase":
+                    if value not in ["initial", "learning_style", "career_goals", "skills_assessment", "complete"]:
+                        raise ValueError(f"Invalid phase: {value}")
+                    if value not in self.completed_phases:
+                        self.completed_phases.append(self.current_phase)
+
+                elif key == "collected_insights":
+                    if not isinstance(value, dict):
+                        raise ValueError("collected_insights must be a dictionary")
+                    for insight_key, insight_value in value.items():
+                        if insight_key not in self.collected_insights:
+                            print(f"WARNING: Unknown insight key: {insight_key}")
+                            continue
+                        self.collected_insights[insight_key].update(insight_value)
+                        continue
+
+                self.set(key, value)
+                print(f"DEBUG: Updated state field {key}: {value}")
         except Exception as e:
-            print(f"Error updating state: {str(e)}")
+            print(f"ERROR updating state: {str(e)}")
+            print(f"Current state before error: {self.__dict__}")
+            raise
 
     def add_message(self, message: Dict[str, str]) -> None:
         """Add message to state with validation."""
@@ -57,24 +78,32 @@ def create_interview_workflow(mock_responses: bool = True) -> Graph:
 
     workflow = StateGraph(InterviewState)
 
-    # Add nodes for each agent
-    workflow.add_node("coordinator", coordinator.generate_response)
-    workflow.add_node("learning_analyzer", learning_analyzer.analyze_response)
-    workflow.add_node("career_analyzer", career_analyzer.create_roadmap)
-    workflow.add_node("aggregator", aggregator.generate_report)
+    # Add nodes for each agent with specified output fields
+    workflow.add_node("coordinator", coordinator.generate_response, output_fields=["messages", "current_phase", "collected_insights"])
+    workflow.add_node("learning_analyzer", learning_analyzer.analyze_response, output_fields=["messages", "current_phase", "collected_insights"])
+    workflow.add_node("career_analyzer", career_analyzer.create_roadmap, output_fields=["messages", "current_phase", "collected_insights"])
+    workflow.add_node("aggregator", aggregator.generate_report, output_fields=["messages", "current_phase", "collected_insights"])
 
-    # Define conditional routing functions
+    # Define conditional routing functions with validation
     def should_transition_to_learning(state: InterviewState) -> bool:
-        return state.get("current_phase") == "learning_style"
+        """Validate and check transition to learning style phase."""
+        current = state.get("current_phase")
+        return current == "initial" and state.get("collected_insights", {}).get("initial_insights")
 
     def should_transition_to_career(state: InterviewState) -> bool:
-        return state.get("current_phase") == "career_goals"
+        """Validate and check transition to career goals phase."""
+        current = state.get("current_phase")
+        return current == "learning_style" and state.get("collected_insights", {}).get("learning_style")
 
     def should_transition_to_skills(state: InterviewState) -> bool:
-        return state.get("current_phase") == "skills_assessment"
+        """Validate and check transition to skills assessment phase."""
+        current = state.get("current_phase")
+        return current == "career_goals" and state.get("collected_insights", {}).get("career_goals")
 
     def should_end_interview(state: InterviewState) -> bool:
-        return state.get("current_phase") == "complete"
+        """Validate and check if interview should end."""
+        current = state.get("current_phase")
+        return current == "skills_assessment" and state.get("collected_insights", {}).get("skills")
 
     # Add conditional edges for phase transitions
     workflow.add_conditional_edges(
