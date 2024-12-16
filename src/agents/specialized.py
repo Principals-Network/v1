@@ -2,11 +2,38 @@
 
 from typing import Dict, List, Any, Optional
 import traceback
+from pydantic import BaseModel
 from langchain.schema import AIMessage, HumanMessage, SystemMessage
-from langchain_community.chat_models import ChatOpenAI
 from langgraph.graph import END
 from .base import BaseAgent, AgentState
-from ..state import InterviewState
+
+class InterviewState(AgentState):
+    """Extended state for interview coordination."""
+    phase_questions: Dict[str, str] = {}
+    current_question: Optional[str] = None
+    phase_completion: Dict[str, bool] = {
+        "initial": False,
+        "learning_style": False,
+        "career_goals": False,
+        "skills_assessment": False
+    }
+
+class LearningStyleState(AgentState):
+    """Extended state for learning style analysis."""
+    analysis_complete: bool = False
+    learning_style: Dict[str, Any] = {}
+    recommendations: List[str] = []
+
+class CareerPathState(AgentState):
+    """Extended state for career path analysis."""
+    career_path: Dict[str, Any] = {}
+    roadmap: List[Dict[str, Any]] = []
+    skill_gaps: List[str] = []
+
+class AggregatorState(AgentState):
+    """Extended state for insight aggregation."""
+    aggregation_complete: bool = False
+    report: Optional[Dict[str, Any]] = None
 
 class InterviewCoordinatorAgent(BaseAgent):
     """Manages the overall flow of the interview process."""
@@ -17,309 +44,290 @@ class InterviewCoordinatorAgent(BaseAgent):
             system_prompt="""You are an expert learning and career development advisor.
             Guide the conversation through different phases to understand the user's learning style,
             career goals, and current skills for personalized recommendations.""",
+            state=InterviewState(),
             mock_responses=mock_responses
         )
-        self.state.set("current_phase", "initial")
-        self.state.set("phase_completion", {
-            "initial": False,
-            "learning_style": False,
-            "career_goals": False,
-            "skills_assessment": False
-        })
         self.mock_responses = {
-            "initial": "Welcome! I'm excited to help create your personalized learning journey. To start, could you tell me about your recent learning experiences? What methods have worked well for you, and what challenges have you faced?",
-            "learning_style": "Thank you for sharing. Based on what you've mentioned, I'd like to explore your learning preferences further. When learning something new, do you prefer practical exercises, theoretical understanding, visual aids, or discussion-based learning? Could you give specific examples?",
-            "career_goals": "Now that I understand your learning style better, let's discuss your career aspirations. What roles or positions interest you most? Where do you see yourself in 3-5 years, and what skills do you think you'll need to get there?",
-            "skills_assessment": "Great career goals! To help create your personalized learning path, could you tell me about your current technical skills and expertise? What areas do you feel confident in, and where would you like to improve?"
-        }
-        self.llm = None if mock_responses else ChatOpenAI(temperature=0.7)
+            "initial": "I understand. Let's start by understanding your learning style. Could you tell me about how you prefer to learn new things?",
+            "learning_style": "I see. Now, let's discuss your career goals. What kind of role or industry interests you?",
+            "career_goals": "Great insights about your career interests. Let's assess your current skills. What technical or soft skills do you already have?",
+            "skills_assessment": "Thank you for sharing. I'll analyze this information to create your personalized learning path."
+        } if mock_responses else {}
 
-    def determine_next_phase(self) -> str:
-        """Determine the next interview phase based on current progress."""
-        phase_completion = self.state.get("phase_completion", {})
-        current_phase = self.state.get("current_phase")
-
-        if not phase_completion.get(current_phase, False):
-            return current_phase
-
-        if not phase_completion.get("initial", False):
-            return "initial"
-        elif not phase_completion.get("learning_style", False):
-            return "learning_style"
-        elif not phase_completion.get("career_goals", False):
-            return "career_goals"
-        elif not phase_completion.get("skills_assessment", False):
-            return "skills_assessment"
-        return "complete"
-
-    def generate_response(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate response based on current state."""
+    async def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Process the current state and determine next steps."""
         try:
-            if isinstance(state, InterviewState):
-                state = state.dict()
+            print(f"\nDEBUG: Processing interview - Current state: {state}")
 
-            current_phase = state.get("current_phase")
-            phase_completion = self.state.get("phase_completion", {})
+            # Initialize state if needed
+            if not state.get('current_phase'):
+                state['current_phase'] = 'initial'
+            if 'messages' not in state:
+                state['messages'] = []
+            if 'completed_phases' not in state:
+                state['completed_phases'] = []
+            if 'collected_insights' not in state:
+                state['collected_insights'] = {}
 
-            print(f"DEBUG: Generating response for phase: {current_phase}")
-            print(f"DEBUG: Current phase completion status: {phase_completion}")
-            print(f"DEBUG: Processing user input: {state.get('messages', [])[-1].get('content', '')[:100] if state.get('messages') else 'None'}...")
+            current_phase = state.get('current_phase', 'initial')
+            completed_phases = state.get('completed_phases', [])
 
-            # For initial empty state, return welcome message
-            if not state.get('messages') and current_phase == "initial":
-                return {
-                    "messages": state.get('messages', []) + [{"role": "assistant", "content": self.mock_responses["initial"]}],
-                    "current_phase": current_phase,
-                    "collected_insights": {},
-                    "next": "coordinator"
+            # Generate response based on current state
+            if self.mock_responses:
+                # Phase-specific responses with consistent state management
+                phase_responses = {
+                    "initial": {
+                        "next": "learning_style",
+                        "current_phase": "learning_style",
+                        "message": "Hello! I'll be conducting your interview today. To start, could you tell me about how you prefer to learn new things?",
+                        "completed_phases": completed_phases + ["initial"] if "initial" not in completed_phases else completed_phases,
+                        "messages": state.get("messages", []) + [{"role": "assistant", "content": "Hello! I'll be conducting your interview today. To start, could you tell me about how you prefer to learn new things?"}]
+                    },
+                    "learning_style": {
+                        "next": "career_path",
+                        "current_phase": "career_path",
+                        "message": "Thank you for sharing your learning preferences. Now, let's discuss your career goals. What kind of role or industry interests you?",
+                        "completed_phases": completed_phases + ["learning_style"] if "learning_style" not in completed_phases else completed_phases,
+                        "messages": state.get("messages", []) + [{"role": "assistant", "content": "Thank you for sharing your learning preferences. Now, let's discuss your career goals. What kind of role or industry interests you?"}],
+                        "learning_style": {"preferred_methods": ["hands-on", "project-based"], "strengths": ["practical application", "experimentation"]}
+                    },
+                    "career_path": {
+                        "next": "aggregate",
+                        "current_phase": "aggregate",
+                        "message": "I understand your career interests. Let's analyze all the information you've shared to create your personalized learning path.",
+                        "completed_phases": completed_phases + ["career_path"] if "career_path" not in completed_phases else completed_phases,
+                        "messages": state.get("messages", []) + [{"role": "assistant", "content": "I understand your career interests. Let's analyze all the information you've shared to create your personalized learning path."}],
+                        "career_path": {"goals": ["software development"], "interests": ["backend", "distributed systems"]}
+                    }
                 }
 
-            # Process user input and transition phases
-            if state.get('messages'):
-                try:
-                    phase_transitions = {
-                        "initial": ("learning_style", "learning_analyzer", "initial_insights"),
-                        "learning_style": ("career_goals", "career_analyzer", "learning_style_insights"),
-                        "career_goals": ("skills_assessment", "aggregator", "career_goals_insights"),
-                        "skills_assessment": ("complete", END, "skills_assessment_insights")
-                    }
-
-                    if current_phase in phase_transitions:
-                        next_phase, next_node, insight_key = phase_transitions[current_phase]
-
-                        # Update phase completion and current phase
-                        phase_completion[current_phase] = True
-                        self.state.set("phase_completion", phase_completion)
-
-                        # Get the last user message for insights
-                        last_message = state.get('messages', [])[-1].get('content', '') if state.get('messages') else ''
-
-                        # Prepare response with collected insights
-                        return {
-                            "messages": state.get('messages', []) + [{"role": "assistant", "content": self.mock_responses.get(next_phase, "Thank you for sharing!")}],
-                            "current_phase": next_phase,
-                            "collected_insights": {insight_key: {"user_input": last_message}},
-                            "next": next_node
-                        }
-
-                except Exception as e:
-                    print(f"ERROR in phase transition: {str(e)}")
-                    traceback.print_exc()
-
-            # Default response for unknown states
-            return {
-                "messages": state.get('messages', []) + [{"role": "assistant", "content": self.mock_responses.get(current_phase, "I didn't catch that. Could you please try again?")}],
-                "current_phase": current_phase,
-                "collected_insights": {},
-                "next": "coordinator"
-            }
+                # Get response for current phase
+                result = phase_responses.get(current_phase, phase_responses["initial"])
+                print(f"DEBUG: Generated mock response for phase {current_phase}: {result}")
+                return result
+            else:
+                result = await self._generate_real_response(state)
+                return result
 
         except Exception as e:
-            print(f"ERROR in generate_response: {str(e)}")
+            print(f"ERROR in process: {str(e)}")
             traceback.print_exc()
-            return {
-                "messages": state.get('messages', []) + [{"role": "assistant", "content": "I apologize, but I encountered an error. Could you please try again?"}],
-                "current_phase": state.get("current_phase", "initial"),
-                "collected_insights": {},
-                "next": "coordinator"
-            }
+            return self._error_response(state)
+
+    def _error_response(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate error response with safe fallback."""
+        return {
+            "message": "I apologize, but I encountered an error processing your response.",
+            "next": state.get("next", "learning_style"),
+            "current_phase": state.get("current_phase", "initial"),
+            "completed_phases": state.get("completed_phases", [])
+        }
 
 class LearningStyleAnalyzerAgent(BaseAgent):
-    """Analyzes user responses for learning style preferences."""
+    """Analyzes user responses to determine optimal learning style."""
 
     def __init__(self, mock_responses: bool = True):
         super().__init__(
             name="Learning Style Analyzer",
-            system_prompt="""You are an expert in learning styles and educational psychology.
-            Analyze responses to identify preferred learning methods, strengths, and areas for improvement.""",
+            system_prompt="""You are an expert in learning style analysis.
+            Analyze user responses to determine their optimal learning approach.""",
+            state=LearningStyleState(),
             mock_responses=mock_responses
         )
-        self.mock_analysis = {
-            "learning_style": "hands-on, practical",
-            "preferred_methods": ["project-based", "interactive", "experiential"],
-            "strengths": ["practical application", "experimental learning"],
-            "areas_for_improvement": ["theoretical foundations"],
-            "confidence": 0.8,
-            "analysis": "User shows strong preference for hands-on, practical learning approaches. Kinesthetic learning style is dominant, with emphasis on project-based learning."
-        }
-        self.llm = None
 
-    def analyze_response(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Analyze user response for learning style insights."""
+    async def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Process the current state to analyze learning style."""
         try:
-            if isinstance(state, InterviewState):
-                state = state.dict()
+            print(f"\nDEBUG: Processing learning style analysis - Current state: {state}")
 
             if self.mock_responses:
-                analysis = {
-                    "learning_style": "Visual and hands-on learner",
-                    "preferred_methods": ["Project-based learning", "Interactive tutorials", "Visual documentation"],
-                    "challenges": ["Traditional lectures", "Text-only materials"],
-                    "recommendations": ["Focus on practical projects", "Use visual learning aids", "Interactive coding exercises"]
-                }
-                return {
-                    "messages": state.get('messages', []) + [{
-                        "role": "assistant",
-                        "content": "Based on your responses, you show a strong preference for visual and hands-on learning approaches."
-                    }],
-                    "current_phase": "learning_style",
-                    "collected_insights": {"learning_style": analysis},
-                    "next": "coordinator"
-                }
+                result = self._generate_mock_analysis(state)
             else:
-                # Implement actual LLM-based analysis here
-                pass
+                result = await self._generate_real_analysis(state)
+
+            # Update state with learning style analysis
+            state.update(result)
+            state['next'] = 'career_path'
+            state['current_phase'] = 'career_path'
+            if 'learning_style' not in state.get('completed_phases', []):
+                state.setdefault('completed_phases', []).append('learning_style')
+
+            return state
 
         except Exception as e:
-            print(f"ERROR in analyze_response: {str(e)}")
-            return {
-                "messages": state.get('messages', []),
-                "current_phase": "learning_style",
-                "collected_insights": {},
-                "next": "coordinator"
+            print(f"ERROR in process: {str(e)}")
+            traceback.print_exc()
+            return self._error_response(state)
+
+    def _generate_mock_analysis(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate mock learning style analysis."""
+        return {
+            "messages": state.get('messages', []) + [{
+                "role": "assistant",
+                "content": "Based on our analysis, your learning style appears to be primarily visual-kinesthetic."
+            }],
+            "learning_style": {
+                "primary_style": "visual-kinesthetic",
+                "strengths": ["Visual learning", "Hands-on practice"],
+                "recommendations": ["Use diagrams", "Interactive exercises"],
+                "confidence": 0.85
             }
+        }
+
+    def _error_response(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate error response with safe fallback."""
+        return {
+            "messages": state.get('messages', []) + [{
+                "role": "assistant",
+                "content": "I apologize, but I encountered an error analyzing your learning style. Could you please try again?"
+            }],
+            "next": "learning_style",
+            "current_phase": "learning_style"
+        }
 
 class CareerPathAnalyzerAgent(BaseAgent):
-    """Analyzes career goals and creates development roadmaps."""
+    """Analyzes user goals and background to suggest career paths."""
 
     def __init__(self, mock_responses: bool = True):
-        """Initialize career path analyzer."""
         super().__init__(
             name="Career Path Analyzer",
-            system_prompt="""You are an expert career development advisor specializing in technology careers.
-            Create personalized career development roadmaps based on goals, skills, and aspirations.""",
+            system_prompt="""You are an expert in career development and planning.
+            Analyze user goals and background to create personalized career roadmaps.""",
+            state=CareerPathState(),
             mock_responses=mock_responses
         )
-        self.mock_roadmap = {
-            "career_path": "Software Architect",
-            "milestones": [
-                "Master system design principles",
-                "Gain experience with distributed systems",
-                "Develop leadership skills"
-            ],
-            "required_skills": {
-                "technical": [
-                    "System design patterns",
-                    "Cloud architecture",
-                    "Distributed systems"
-                ],
-                "soft_skills": [
-                    "Technical leadership",
-                    "Communication",
-                    "Project management"
-                ]
-            },
-            "learning_path": [
-                "Complete system design courses",
-                "Work on distributed system projects",
-                "Lead technical initiatives"
-            ],
-            "confidence": 0.9
-        }
-        self.llm = None
 
-    def create_roadmap(self, user_input: str, context: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Create career development roadmap."""
+    async def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Process the current state to analyze career path."""
         try:
+            print(f"\nDEBUG: Processing career path analysis - Current state: {state}")
+
             if self.mock_responses:
-                roadmap = {
-                    "career_path": "Software Architect",
-                    "milestones": [
-                        "Master system design principles",
-                        "Gain experience with distributed systems",
-                        "Develop leadership skills"
-                    ],
-                    "skills_needed": [
-                        "Advanced system design",
-                        "Cloud architecture",
-                        "Technical leadership"
-                    ]
-                }
-                return {
-                    "messages": context + [{
-                        "role": "assistant",
-                        "content": "I've created a roadmap focused on your software architect career goals."
-                    }],
-                    "current_phase": "career_goals",
-                    "collected_insights": {"career_goals": roadmap},
-                    "next": "coordinator"
-                }
+                result = self._generate_mock_roadmap(state)
             else:
-                # Implement actual LLM-based roadmap creation here
-                pass
+                result = await self._generate_real_roadmap(state)
+
+            # Update state with career path analysis
+            state.update(result)
+            state['next'] = 'aggregate'
+            state['current_phase'] = 'aggregate'
+            if 'career_path' not in state.get('completed_phases', []):
+                state.setdefault('completed_phases', []).append('career_path')
+
+            return state
 
         except Exception as e:
-            print(f"ERROR in create_roadmap: {str(e)}")
-            return {
-                "messages": context,
-                "current_phase": "career_goals",
-                "collected_insights": {},
-                "next": "coordinator"
+            print(f"ERROR in process: {str(e)}")
+            traceback.print_exc()
+            return self._error_response(state)
+
+    def _generate_mock_roadmap(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate mock career path analysis."""
+        return {
+            "messages": state.get('messages', []) + [{
+                "role": "assistant",
+                "content": "Based on your goals and background, here's a suggested career development path."
+            }],
+            "career_path": {
+                "suggested_path": "Full-stack Development",
+                "milestones": ["Frontend basics", "Backend development", "DevOps"],
+                "timeline": "12-18 months",
+                "confidence": 0.9
             }
+        }
+
+    def _error_response(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate error response with safe fallback."""
+        return {
+            "messages": state.get('messages', []) + [{
+                "role": "assistant",
+                "content": "I apologize, but I encountered an error analyzing your career path. Could you please try again?"
+            }],
+            "next": "career_path",
+            "current_phase": "career_path"
+        }
 
 class InsightAggregatorAgent(BaseAgent):
-    """Aggregates insights from all phases to generate comprehensive reports."""
+    """Aggregates insights from all analyses to generate final report."""
 
     def __init__(self, mock_responses: bool = True):
         super().__init__(
             name="Insight Aggregator",
-            system_prompt="""You are an expert in synthesizing educational and career development insights.
-            Create comprehensive personal development recommendations based on learning style, career goals, and skills.""",
+            system_prompt="""You are an expert in synthesizing learning and career insights.
+            Combine analyses to create comprehensive, actionable recommendations.""",
+            state=AggregatorState(),
             mock_responses=mock_responses
         )
-        self.mock_report = {
-            "learning_profile": {
-                "primary_style": "Hands-on, practical learner",
-                "effective_methods": [
-                    "Project-based learning",
-                    "Interactive workshops",
-                    "Practical exercises"
-                ]
-            },
-            "career_development": {
-                "target_role": "Technical Architect",
-                "key_milestones": [
-                    "Complete system design certification",
-                    "Lead team projects",
-                    "Contribute to architecture decisions"
-                ]
-            },
-            "recommendations": [
-                "Focus on hands-on architectural exercises",
-                "Join technical leadership workshops",
-                "Participate in team projects to develop leadership skills"
-            ]
-        }
-        self.llm = None
 
-    def generate_report(self, insights: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate final insights report."""
+    async def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Process the current state to aggregate insights and generate report."""
         try:
+            print(f"\nDEBUG: Processing insight aggregation - Current state: {state}")
+
             if self.mock_responses:
-                report = {
-                    "learning_profile": insights.get("learning_style", {}),
-                    "career_development": insights.get("career_goals", {}),
-                    "recommendations": {
-                        "learning_approach": "Project-based curriculum with visual aids",
-                        "skill_development": "Focus on system design and cloud architecture",
-                        "next_steps": "Begin with hands-on distributed systems projects"
-                    }
-                }
-                return {
-                    "messages": [{"role": "assistant", "content": "Your personalized learning and career development report is ready."}],
-                    "current_phase": "complete",
-                    "collected_insights": {"final_report": report},
-                    "next": "END"
-                }
+                result = self._format_insights(state)
             else:
-                # Implement actual LLM-based report generation here
-                pass
+                result = await self._generate_real_insights(state)
+
+            # Update state with aggregated insights and final report
+            state.update(result)
+            state['next'] = END
+            state['current_phase'] = 'complete'
+            if 'aggregate' not in state['completed_phases']:
+                state['completed_phases'].append('aggregate')
+
+            return state
 
         except Exception as e:
-            print(f"ERROR in generate_report: {str(e)}")
-            return {
-                "messages": [],
-                "current_phase": "complete",
-                "collected_insights": {},
-                "next": "coordinator"
-            }
+            print(f"ERROR in process: {str(e)}")
+            traceback.print_exc()
+            return self._error_response(state)
+
+    def _format_insights(self, insights: Dict[str, Any]) -> Dict[str, Any]:
+        """Format collected insights for report generation."""
+        learning_style = insights.get('learning_style', {})
+        career_roadmap = insights.get('career_roadmap', {})
+
+        return {
+            "messages": insights.get('messages', []) + [{
+                "role": "assistant",
+                "content": "\n".join([
+                    "Based on the collected insights, generate a comprehensive development report:",
+                    "---",
+                    "Learning Style Analysis:",
+                    f"{learning_style.get('analysis', 'Not available')}",
+                    "---",
+                    "Career Roadmap:",
+                    f"{career_roadmap.get('analysis', 'Not available')}",
+                    "---",
+                    "Please provide a detailed report including:",
+                    "1. Learning profile and preferences",
+                    "2. Career development pathway",
+                    "3. Specific recommendations for:",
+                    "   - Learning approaches",
+                    "   - Skill development",
+                    "   - Immediate next steps",
+                    "4. Timeline and milestones",
+                    "Format the response as a comprehensive yet conversational report."
+                ])
+            }],
+            "current_phase": "complete",
+            "collected_insights": {"final_report": {
+                "analysis": "Mock analysis",
+                "confidence": 0.9,
+                "timestamp": "auto-generated"
+            }},
+            "next": END
+        }
+
+    def _error_response(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate error response with safe fallback."""
+        return {
+            "messages": state.get('messages', []) + [{
+                "role": "assistant",
+                "content": "I apologize, but I encountered an error generating your comprehensive report. Could you please try again?"
+            }],
+            "current_phase": "complete",
+            "collected_insights": {},
+            "next": END
+        }

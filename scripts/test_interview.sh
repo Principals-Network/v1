@@ -11,7 +11,7 @@ send_request() {
     local phase=$1
     local message=$2
     echo "Sending $phase response..."
-    RESPONSE=$(curl -s -X POST "http://localhost:8000/interview/$SESSION_ID/respond" \
+    RESPONSE=$(curl -s -X POST "http://localhost:8001/interview/$SESSION_ID/respond" \
       -H "Content-Type: application/json" \
       -H "Accept: application/json" \
       -d "{\"message\": \"$message\"}")
@@ -22,7 +22,7 @@ send_request() {
 
 # Start new interview session and capture the session ID
 echo "Starting new interview session..."
-RESPONSE=$(curl -s -X POST http://localhost:8000/interview/start \
+RESPONSE=$(curl -s -X POST http://localhost:8001/interview/start \
   -H "Content-Type: application/json" \
   -H "Accept: application/json" \
   -d '{}')
