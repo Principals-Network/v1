@@ -1,10 +1,10 @@
 """State management for the interview workflow."""
 from typing import Dict, Any, List, TypeVar, Optional, Iterator
 from dataclasses import dataclass, field
-from langgraph.graph import GraphState
+from langgraph.checkpoint import BaseState
 
 @dataclass
-class InterviewState(GraphState):
+class InterviewState(BaseState):
     """Interview state management with LangGraph integration."""
     messages: List[Dict[str, str]] = field(default_factory=list)
     current_phase: str = "initial"
@@ -31,6 +31,10 @@ class InterviewState(GraphState):
         except Exception as e:
             print(f"ERROR in __setitem__: {str(e)}")
             raise
+
+    def __contains__(self, key: str) -> bool:
+        """Check if key exists in state."""
+        return key in self.keys()
 
     def keys(self) -> Iterator[str]:
         """Return iterator of state keys for LangGraph compatibility."""
