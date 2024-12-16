@@ -1,13 +1,13 @@
 """LangGraph workflow for user profiling system."""
 from typing import Dict, Any, List, TypeVar, Optional
 from langgraph.graph import Graph, StateGraph, END
-from src.agents.specialized import (
+from .agents.specialized import (
     InterviewCoordinatorAgent,
     LearningStyleAnalyzerAgent,
     CareerPathAnalyzerAgent,
     InsightAggregatorAgent
 )
-from src.state import InterviewState
+from .state import InterviewState
 
 def create_interview_workflow(mock_responses: bool = True) -> Graph:
     """Create the interview workflow graph."""

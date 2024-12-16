@@ -6,7 +6,7 @@ from langchain.schema import AIMessage, HumanMessage, SystemMessage
 from langchain_community.chat_models import ChatOpenAI
 from langgraph.graph import END
 from .base import BaseAgent, AgentState
-from src.state import InterviewState
+from ..state import InterviewState
 
 class InterviewCoordinatorAgent(BaseAgent):
     """Manages the overall flow of the interview process."""
