@@ -1,10 +1,10 @@
 """State management for the interview workflow."""
 from typing import Dict, Any, List, TypeVar, Optional, Iterator
 from dataclasses import dataclass, field
-from langgraph.checkpoint import BaseState
+from langgraph.state import State
 
 @dataclass
-class InterviewState(BaseState):
+class InterviewState(State):
     """Interview state management with LangGraph integration."""
     messages: List[Dict[str, str]] = field(default_factory=list)
     current_phase: str = "initial"
